@@ -2,18 +2,23 @@
 """ this is the manager game """
 
 import sys
+import math
 from typing import Tuple, Dict, Union, List
 import pygame as pg
+import random
 
 from battle_tanks.commons.package import Struct, Collision
 from battle_tanks.components.movement import MovementComponent
 from battle_tanks.components.tile_map import TileMap
 from battle_tanks.components.camera import CameraComponent
 from battle_tanks.sprites import Player, Brick
+
+from battle_tanks.sprites.elements import Particle
 from battle_tanks.commons.municion import CannonType
 from battle_tanks.commons.tank_surface import tank_cover
 from battle_tanks.components.network import NetworkComponent
 from battle_tanks import ROUTE
+
 
 
 type_guns = {
@@ -22,9 +27,13 @@ type_guns = {
 pg.mixer.init()
 SOUND_BOOM = pg.mixer.Sound(ROUTE("assets/sound/boom.wav"))
 SHOT = pg.mixer.Sound(ROUTE("assets/sound/shot.wav"))
+BG_TRACK = pg.mixer.music.load(ROUTE("assets/sound/bg_track.wav"))
+pg.mixer.music.play(-1)
 
 SOUND_BOOM.set_volume(0.1)
 SHOT.set_volume(0.1)
+pg.mixer.music.set_volume(0.5)
+
 
 
 
@@ -39,10 +48,14 @@ class Game:
     def __init__(self,
                  addr:Union[Tuple[str,int], None],
                  screen:pg.Surface,
-                 player_name="John"):
+                 player_name="John",
+                 tank_color:int=0):
+        
+        self.laser_timers = {}
 
-        self.network = NetworkComponent(addr,player_name) if addr is not None else None
+        self.network = NetworkComponent(addr, player_name, tank_color) if addr is not None else None
         self._player_number = self.network.player_number if addr is not None else 0
+        self.tank_color = tank_color
         self.positions = {}
 
 
@@ -59,41 +72,203 @@ class Game:
         self.players: Dict[int,Player] = {}
         self._bricks = pg.sprite.Group()
         self._bullets = pg.sprite.Group()
+        self._particles = pg.sprite.Group()
         self._damage = 0
+                     
 
         if self.network and self.network.player_data != Struct.USER_NOT_AVAILABLE:
             position = (self.network.player_data["x"],self.network.player_data["y"])
         else:
             position = (0,0)
 
-        self.player = Player(position, self._player_number, cannon_type=type_guns.get("MEDIUM"))
+        self.player = Player(position, self._player_number, cannon_type=type_guns.get("MEDIUM"), tank_color=tank_color)
         self.players[self._player_number] = self.player
         self.camera = CameraComponent(self.tile.WIDTH, self.tile.HEIGHT, (self.WIDTH, self.HEIGHT))
         self.move = MovementComponent(self.network, self.player)
         self.load()
+
+        self._powerups = pg.sprite.Group()
+        self._landmines = pg.sprite.Group()
+        self.landmine_count = 0
+        self._font = pg.font.Font(None, 24)  
+        self._spawn_powerups()
+        
+        self.notifications = [] 
+        self.mine_cooldown = 0
+
+    def add_notification(self, text: str, duration: int = 120):
+        self.notifications.append({"text": text, "timer": duration})
 
 
     @property
     def damage(self):
         """ return damage from player """
         return self.player.damage
-
+    
+    def _spawn_particles(self, x, y, count=8):
+        """Spawn particles at brick destruction location"""
+        import math
+        import random
+        for _ in range(count):
+            angle = random.uniform(0, 2 * math.pi)
+            speed = random.uniform(2, 5)
+            vx = speed * math.cos(angle)
+            vy = speed * math.sin(angle)
+            particle = Particle(x, y, vx, vy, color=(139, 69, 19))
+            self._particles.add(particle)
 
     def load(self):
         for data_sprite in self.network.get_events_to_game_state():
             if data_sprite[0] == Struct.BRICK:
                 brick = Brick(data_sprite[1],data_sprite[2],data_sprite[3],data_sprite[4])
                 self._bricks.add(brick)
+                Collision.bricks.add(brick)  # Also add to collision system
 
+    def _spawn_powerups(self):
+        """ Spawns 5 crates randomly across the map coordinates """
+        for _ in range(5):
+            rx = random.randint(100, 1000)
+            ry = random.randint(100, 1000)
+            self._powerups.add(PowerUp(rx, ry))
 
+    def place_landmine(self):
+        if self.landmine_count > 0:
+            mine = LandMine(int(self.player.rect.x), int(self.player.rect.y), self._player_number)
+            self._landmines.add(mine)
+            self.landmine_count -= 1
+            
+            if self.network:
+                event_data = Struct.pack_tile({
+                    "type": 98, 
+                    "x": mine.world_x,
+                    "y": mine.world_y,
+                    "w": self._player_number,
+                    "h": 0
+                })
+                self.network.send_move_tcp(event_data)
+            
+    def break_brick_locally(self, brick):
+        """Handles the local visual removal of a brick."""
+        if brick in self._bricks:
+            self._bricks.remove(brick)
+            Collision.bricks.remove(brick)
+            self._spawn_particles(brick.rect.centerx, brick.rect.centery)
+            SOUND_BOOM.play()
+            brick.kill()
+
+    def send_brick_break_to_server(self, brick):
+        """Informs the network that a brick has been destroyed."""
+        if self.network:
+            event_data = Struct.pack_tile({
+                "type": Struct.BROKE_BRICK,
+                "x": brick.rect.x,
+                "y": brick.rect.y,
+                "w": brick.rect.w,
+                "h": brick.rect.h
+            })
+            self.network.send_move_tcp(event_data)
     def update(self):
         """ Update Game"""
-
-        for key,player in self.players.items():
+        keys = pg.key.get_pressed()
+        if keys[pg.K_m] and self.mine_cooldown == 0 and self.landmine_count > 0:
+            self.place_landmine()
+            self.add_notification("Landmine Placed!")
+            self.mine_cooldown = 30  
+            
+        if self.mine_cooldown > 0:
+            self.mine_cooldown -= 1
+                
+                    
+        for key, player in self.players.items():
             if player.fire:
                 SHOT.play()
                 player.fire = False
+                # Spawn bullet from cannon position
+                bullet_start_pos = player.rect_cannon.center
+                bullet = Bullet(bullet_start_pos, player.angle_cannon)
+                self._bullets.add(bullet)
 
+        self._bullets.update(self.tile_rect)
+        self._particles.update()
+        dt = 1/60
+
+        self._powerups.update()
+        
+        player_rect = pg.Rect(self.player.rect.x, self.player.rect.y, 40, 40)
+        for pu in [p for p in self._powerups if player_rect.colliderect(p.rect)]:
+            self.landmine_count += 1
+            pu.kill()
+            
+            rx = random.randint(100, 1000)
+            ry = random.randint(100, 1000)
+            self._powerups.add(PowerUp(rx, ry))
+            
+            self.add_notification("You got a Landmine!")
+        
+        active_tanks = [
+            {"x": p.rect.centerx, "y": p.rect.centery, "id": p.player_number, "obj": p} 
+            for p in self.players.values()
+        ]
+        
+        self._landmines.update(active_tanks, self._player_number)
+        
+        for mine in list(self._landmines):
+            if mine.check_trigger(active_tanks):
+                for p in active_tanks:
+                    dist = math.sqrt((p["x"] - mine.world_x)**2 + (p["y"] - mine.world_y)**2)
+                    if dist < LandMine.EXPLOSION_RADIUS:
+                        if p["obj"].player_number == self._player_number:
+                            damage_taken = int(LandMine.DAMAGE * (1 - dist / LandMine.EXPLOSION_RADIUS))
+                            
+                            if self.network:
+                                event_data = Struct.pack_tile({
+                                    "type": 99, 
+                                    "x": mine.world_x,
+                                    "y": mine.world_y,
+                                    "w": damage_taken,  
+                                    "h": self._player_number 
+                                })
+                                self.network.send_move_tcp(event_data)
+                            else:
+                                p["obj"].damage += damage_taken 
+                
+                mine.kill()
+                self._spawn_particles(mine.world_x, mine.world_y, count=20)
+                SOUND_BOOM.play()
+
+        # Check bullet collisions with bricks (destructible objects)
+        for bullet in self._bullets:
+            hit_bricks = pg.sprite.spritecollide(bullet, self._bricks, False,)
+            if hit_bricks:
+                for brick in hit_bricks:
+                    self._bricks.remove(brick)
+                    Collision.bricks.remove(brick)
+                    self._spawn_particles(brick.rect.centerx, brick.rect.centery)
+                    if self.network:
+                        event_data = Struct.pack_tile({
+                            "type": Struct.BROKE_BRICK,
+                            "x": brick.rect.x,
+                            "y": brick.rect.y,
+                            "w": brick.rect.w,
+                            "h": brick.rect.h
+                        })
+                        self.network.send_move_tcp(event_data)
+                    SOUND_BOOM.play()
+                    # Camera shake when hitting a brick
+                    self.camera.shake(duration=10, intensity=3)
+                    brick.kill()
+                bullet.kill()
+            
+            # Check bullet collisions with other players
+            for player in self.players.values():
+                if player.player_number == self._player_number:
+                    continue  # Don't check collision with self
+                if bullet.rect.colliderect(player.rect):
+                    # Camera shake when hitting another player
+                    self.camera.shake(duration=15, intensity=4)
+                    bullet.kill()
+                    break
+                
         """ SEND MOVES BYTES """
         self.move.keys()
         """ MOVES RESPONSE """
@@ -105,15 +280,17 @@ class Game:
                 if (recv.get("status") == Struct.NEW_PLAYER or
                         recv.get("status") == Struct.OLD_PLAYER):
                     position = recv["position"]
-                    player = Player((recv["x"],recv["y"]), position, cannon_type = type_guns.get("BASIC"))
+                    tank_color = recv.get("tank_color", 0)
+                    player = Player((recv["x"],recv["y"]), position, cannon_type = type_guns.get("BASIC"), tank_color=tank_color)
                     player.name = recv.get("name", f"Player {position}")  # Establecer el nombre del jugador
                     self.players[position] = player
 
-                elif recv.get("status") == Struct.UPDATE_PLAYER:
+                elif recv.get("status") in (Struct.UPDATE_PLAYER, Struct.PLAYER_SHOT):
                     position = recv["position"]
-
+                    
                     if self.players.get(position):
                         player = self.players[position]
+                        old_damage = player.damage
 
                         player.rect.x = recv["x"]
                         player.rect.y = recv["y"]
@@ -121,12 +298,23 @@ class Game:
                         player.body_rect.x = player.rect.x
                         player.body_rect.y = player.rect.y
 
+                        player.rect_cannon.center = player.body_rect.center
+
                         player.angle = recv["angle"]
                         player.angle_cannon = recv["angle_cannon"]
                         player.damage = recv["damage_indicator"]
+                        
+                        # Camera shake when the player takes damage
+                        if recv["damage_indicator"] > old_damage and player.player_number == self._player_number:
+                            self.camera.shake(duration=12, intensity=5)
+                        
+                        player.laser_active = recv.get("laser_active", getattr(player, "laser_active", False))
+
+                    
 
                     else:
-                        player = Player((recv["x"], recv["y"]), position, cannon_type=type_guns.get("BASIC"))
+                        tank_color = recv.get("tank_color", 0)
+                        player = Player((recv["x"], recv["y"]), position, cannon_type=type_guns.get("BASIC"), tank_color=tank_color)
                         player.name = recv.get("name", f"Player {position}")  # Establecer el nombre del jugador
                         self.players[position] = player
 
@@ -135,62 +323,144 @@ class Game:
                     sprite_brick = find_sprite(brick_rect, self._bricks)
                     if sprite_brick:
                         self._bricks.remove(sprite_brick)
+                        self._spawn_particles(sprite_brick.rect.centerx, sprite_brick.rect.centery)
                         SOUND_BOOM.play()
                         sprite_brick.kill()
+                        
+                    collision_brick = find_sprite(brick_rect, Collision.bricks)
+                    if collision_brick:
+                        Collision.bricks.remove(collision_brick)
 
                 elif recv.get("status") == Struct.BLOCK:
-                    Brick.boom() #Change for Block sound
+                    Brick.boom() 
+
+                elif recv.get("status") == 98:
+                    owner_id = recv["w"]
+                    if owner_id != self._player_number: 
+                        enemy_mine = LandMine(recv["x"], recv["y"], owner_id)
+                        self._landmines.add(enemy_mine)
+
+                elif recv.get("status") == 99:
+                    hit_player_id = recv["h"]
+                    if hit_player_id != self._player_number:
+                        self._spawn_particles(recv["x"], recv["y"], count=20)
+                        SOUND_BOOM.play()
+        
+                        for mine in list(self._landmines):
+                            if mine.world_x == recv["x"] and mine.world_y == recv["y"]:
+                                mine.kill()
 
         self.camera.update(self.player)
 
-
     def draw(self, main_screen: pg.Surface):
         """ Draw the player and scene. """
+        # 1. DRAW BACKGROUND
         self.SCREEN.blit(self.tile_image,self.camera.apply_rect(self.tile_rect))
 
+        # 2. DRAW BULLETS
+        for bullet in self._bullets:
+            self.SCREEN.blit(bullet.image, self.camera.apply(bullet))
+
+        # 3. DRAW PLAYERS, LASERS, AND UI BARS
         for _,player in self.players.items():
             # Dibujar el tanque
             tank_rect = self.camera.apply(player)
-            tank_cover(player.player_number, tank_rect, self.SCREEN, angle=player.angle,
+            tank_cover(player.tank_color, tank_rect, self.SCREEN, angle=player.angle,
                        angle_cannon=player.angle_cannon)
             
+            if getattr(player, "laser_active", False):
+                import math
+                rad_angle = math.radians(-player.angle_cannon - 90)
+                
+                barrel_offset = 20 
+                start_pos = (
+                    tank_rect.centerx + barrel_offset * math.cos(rad_angle),
+                    tank_rect.centery + barrel_offset * math.sin(rad_angle)
+                )
+                
+                end_pos = (start_pos[0] + 300 * math.cos(rad_angle), 
+                           start_pos[1] + 300 * math.sin(rad_angle))
+                
+                pg.draw.line(self.SCREEN, (255, 50, 50), start_pos, end_pos, 5)
+                pg.draw.line(self.SCREEN, (255, 255, 255), start_pos, end_pos, 2) 
+
             # Dibujar el nombre del jugador
-            font = pg.font.Font(None, 24)  # Crear una fuente
-            text_surface = font.render(player.name, True, (255, 255, 255))  # Texto blanco
+            font = pg.font.Font(None, 24)  
+            text_surface = font.render(player.name, True, (255, 255, 255))  
             text_rect = text_surface.get_rect()
             
-            # Posicionar el texto encima del tanque
             text_rect.centerx = tank_rect.centerx
-            text_rect.bottom = tank_rect.top - 5  # 5 p├¡xeles arriba del tanque
-            
-            # Dibujar el texto
+            text_rect.bottom = tank_rect.top - 5  
             self.SCREEN.blit(text_surface, text_rect)
 
             # Dibujar la barra de vida
-            health_width = 50  # Ancho de la barra de vida
-            health_height = 5  # Alto de la barra de vida
+            health_width = 50  
+            health_height = 5  
             health_x = tank_rect.centerx - health_width // 2
-            health_y = text_rect.bottom + 2  # 2 p├¡xeles debajo del nombre
+            health_y = text_rect.bottom + 2  
 
-            # Barra de vida base (gris)
             pg.draw.rect(self.SCREEN, (100, 100, 100), 
                         (health_x, health_y, health_width, health_height))
             
-            # Calcular el ancho de la barra de vida actual
             health_percentage = 1 - (player.damage / Player.MAX_DAMAGE)
             current_health_width = int(health_width * health_percentage)
             
-            # Barra de vida actual (roja)
             pg.draw.rect(self.SCREEN, (255, 0, 0), 
                         (health_x, health_y, current_health_width, health_height))
 
-        for brick in self._bricks:
-            self.SCREEN.blit(brick.image,self.camera.apply(brick))
+            if player.player_number == self._player_number:
+                energy_y = health_y + health_height + 2 
+                
+                pg.draw.rect(self.SCREEN, (50, 50, 50), 
+                            (health_x, energy_y, health_width, health_height))
+                
+                current_energy = getattr(player, "laser_energy", 100)
+                current_energy_width = int(health_width * (current_energy / 100))
+                
+                pg.draw.rect(self.SCREEN, (0, 255, 255), 
+                            (health_x, energy_y, current_energy_width, health_height))
 
+                inv_surface = font.render(f"Mines: {getattr(self, 'landmine_count', 0)}", True, (255, 255, 0))
+                inv_rect = inv_surface.get_rect()
+                inv_rect.centerx = tank_rect.centerx
+                inv_rect.top = energy_y + health_height + 2
+                self.SCREEN.blit(inv_surface, inv_rect)
+
+        for brick in self._bricks:
+            self.SCREEN.blit(brick.image, self.camera.apply(brick))
+
+        for particle in self._particles:
+            self.SCREEN.blit(particle.image, self.camera.apply(particle))
+
+
+        for pu in self._powerups:
+            self.SCREEN.blit(pu.image, self.camera.apply(pu))
+        for mine in self._landmines:
+            self.SCREEN.blit(mine.image, self.camera.apply(mine))
+    
         telescopic_pos = Collision.calculate_bullet_position(self.player.telescopic_sight(), 100)
         telescopic_rect = self.camera.apply_rect(pg.rect.Rect(telescopic_pos[0],telescopic_pos[1],20,20))
-
         self.SCREEN.blit(Player.TELESCOPIC_SIGH, telescopic_rect)
+
+        y_offset = 60 
+        for notif in getattr(self, "notifications", [])[:]:
+            if notif["timer"] > 0:
+                alpha = min(255, notif["timer"] * 4) 
+                
+                notif_surface = self._font.render(notif["text"], True, (255, 255, 0))
+                notif_surface.set_alpha(alpha) 
+                
+                notif_rect = notif_surface.get_rect(center=(self.WIDTH // 2, y_offset))
+                
+                bg_rect = notif_rect.inflate(20, 10)
+                pg.draw.rect(self.SCREEN, (0, 0, 0, 150), bg_rect, border_radius=5)
+                self.SCREEN.blit(notif_surface, notif_rect)
+                
+                notif["timer"] -= 1
+                y_offset += 35 
+            else:
+                self.notifications.remove(notif)
+
         main_screen.blit(self.SCREEN, (0,0))
         
 
