@@ -221,24 +221,29 @@ class Server:
                 conn,addr = self._socket.accept()
                 conn.setsockopt(socket.IPPROTO_TCP, socket.TCP_NODELAY, 1)
                 conn.send(Struct.OK_MESSAGE)
-                data = conn.recv(Struct.BUFFER_SIZE_NAME)
+                data = conn.recv(Struct.BUFFER_SIZE_NAME + 1)  # NAME + tank_color
 
                 try:
-                    if data != b'': #NAME PLAYER
-                        data = Struct.unpack(data)
-                        logger.warning(f"ADD NEW_CONEXIONS: {data}")
-                        if data.find("-c") > -1:
-                            if data[:-2] in self._filter_name:
+                    if data != b'': #NAME PLAYER + TANK_COLOR
+                        # Extract name (first 32 bytes) and tank_color (byte 33)
+                        name_bytes = data[:Struct.BUFFER_SIZE_NAME]
+                        tank_color = data[Struct.BUFFER_SIZE_NAME] if len(data) > Struct.BUFFER_SIZE_NAME else 0
+                        
+                        # Decode name and strip null bytes
+                        name = name_bytes.decode('utf-8').rstrip('\x00')
+                        logger.warning(f"ADD NEW_CONEXIONS: {name} with tank_color: {tank_color}")
+                        if name.find("-c") > -1:
+                            if name[:-2] in self._filter_name:
                                 conn.send(Struct.USER_NOT_AVAILABLE)
                             conn.send(Struct.OK_MESSAGE)
                             continue
 
                         current = list(set(range(self._max_players)) - set([position for position, _ in self._data.items()]))[0]
-                        searching_player = self.persistence.find("player", {"name": data})
+                        searching_player = self.persistence.find("player", {"name": name})
 
                         if len(searching_player) > 0:
                             """check user if exists in self._data"""
-                            if data in self._filter_name:
+                            if name in self._filter_name:
                                 logger.debug(f"NAME IN DATA: {self._filter_name} TO: {Struct.USER_NOT_AVAILABLE}")
                                 conn.send(Struct.USER_NOT_AVAILABLE)
                                 continue
@@ -252,14 +257,15 @@ class Server:
                             player = self.persistence.save(
                                 "player",{
                                     "damage_indicator":0,
-                                    "name": data,
+                                    "name": name,
                                     "position": current,
                                     "x": x,
                                     "y": y,
                                     "cannon_x":338,
                                     "cannon_y":692,
                                     "angle":0,
-                                    "angle_cannon":0
+                                    "angle_cannon":0,
+                                    "tank_color": tank_color
                                 })
                         else:
                             player = searching_player[0]
@@ -270,6 +276,7 @@ class Server:
                             player["x"] = x
                             player["y"] = y
                             player["position"] = current
+                            player["tank_color"] = tank_color  # Update tank_color
 
                         player["conn"] = conn
                         """Current Player in Queue."""
