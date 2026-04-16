@@ -3,7 +3,7 @@ import pygame as pg
 
 
 class Bullet(pg.sprite.Sprite):
-    SPEED = 8
+    SPEED = 4
     MAX_DISTANCE = 500
     SIZE = 8
 

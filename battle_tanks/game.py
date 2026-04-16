@@ -13,6 +13,7 @@ from battle_tanks.components.tile_map import TileMap
 from battle_tanks.components.camera import CameraComponent
 from battle_tanks.sprites import Player, Brick
 
+from battle_tanks.sprites.bullet import Bullet
 from battle_tanks.sprites.elements import Particle
 from battle_tanks.commons.municion import CannonType
 from battle_tanks.commons.tank_surface import tank_cover
@@ -71,6 +72,7 @@ class Game:
 
         self.players: Dict[int,Player] = {}
         self._bricks = pg.sprite.Group()
+        self._bullets = pg.sprite.Group()
         self._particles = pg.sprite.Group()
         self._damage = 0
                      
@@ -141,6 +143,29 @@ class Game:
             self.network.send_move_tcp(event_data)
     def update(self):
         """ Update Game"""
+
+        for key, player in self.players.items():
+            if player.fire:
+                SHOT.play()
+                player.fire = False
+                # Spawn bullet from cannon position
+                bullet_start_pos = player.rect_cannon.center
+                bullet = Bullet(bullet_start_pos, player.angle_cannon)
+                self._bullets.add(bullet)
+
+        self._bullets.update(self.tile_rect)
+
+        # Check bullet collisions with bricks (destructible objects)
+        for bullet in self._bullets:
+            hit_bricks = pg.sprite.spritecollide(bullet, self._bricks, False,)
+            if hit_bricks:
+                for brick in hit_bricks:
+                    self._bricks.remove(brick)
+                    Collision.bricks.remove(brick)
+                    SOUND_BOOM.play()
+                    brick.kill()
+                bullet.kill()
+
         self._particles.update()
         dt = 1/60
                 
@@ -179,6 +204,10 @@ class Game:
                         player.angle_cannon = recv["angle_cannon"]
                         player.damage = recv["damage_indicator"]
                         
+                        # Camera shake when the player takes damage
+                        if recv["damage_indicator"] > old_damage and player.player_number == self._player_number:
+                            self.camera.shake(duration=12, intensity=5)
+                        
                         player.laser_active = recv.get("laser_active", getattr(player, "laser_active", False))
 
                     
@@ -213,6 +242,8 @@ class Game:
         """ Draw the player and scene. """
         # 1. DRAW BACKGROUND
         self.SCREEN.blit(self.tile_image,self.camera.apply_rect(self.tile_rect))
+        for bullet in self._bullets:
+            self.SCREEN.blit(bullet.image, self.camera.apply(bullet))
 
         # 2. DRAW PLAYERS, LASERS, AND UI BARS
         for _,player in self.players.items():

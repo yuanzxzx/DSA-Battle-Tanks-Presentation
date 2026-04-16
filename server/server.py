@@ -119,7 +119,7 @@ class Server:
         logger.warning(f"RUNNING NEW THREAD CLIENT: {client_socket.getsockname()} - THREAD -- {th.current_thread().name}")
         while True:
             try:
-                data = client_socket.recv(Struct.BUFFER_SIZE_EVENT)
+                data = client_socket.recv(Struct.BUFFER_SIZE_EVENT_RESPONSE)
                 if not data:
                     position = self._get_player_position(client_socket)
                     if position == -1:
@@ -165,22 +165,34 @@ class Server:
                     FIX THAT
                     """
 
-                    if data in Struct.MOVES:
-                        # Validar colisiones después del movimiento
-                        if data == Struct.UP_EVENT_PLAYER or data == Struct.DOWN_EVENT_PLAYER:
-                            Collision.collide_with_objects(player_data)
-                        
-                        # Enviar la posición validada al cliente
-                        encoded_message = Struct.pack_player(data, player_data)
-                        q.put(encoded_message)
+                    if len(data) == Struct.BUFFER_SIZE_EVENT:
+                        if data in Struct.MOVES:
+                            # Validar colisiones después del movimiento
+                            if data == Struct.UP_EVENT_PLAYER or data == Struct.DOWN_EVENT_PLAYER:
+                                Collision.collide_with_objects(player_data)
+                            
+                            # Enviar la posición validada al cliente
+                            encoded_message = Struct.pack_player(data, player_data)
+                            q.put(encoded_message)
 
-                    elif data == Struct.FIRE_EVENT_PLAYER:
-                        encoded_message = Struct.pack_event(player_data)
-                        if encoded_message:
-                            if len(encoded_message) == Struct.SIZE_PLAYER:
-                                q.put(Struct.OK_MESSAGE + encoded_message)
-                            else:
-                                q.put(encoded_message)
+                        elif data == Struct.FIRE_EVENT_PLAYER:
+                            # Let the projectile collision send the brick break event.
+                            pass
+
+                    elif len(data) == Struct.BUFFER_SIZE_EVENT_RESPONSE:
+                        event = Struct.unpack_event(data)
+                        if event[0] == Struct.BROKE_BRICK:
+                            x, y, w, h = event[1], event[2], event[3], event[4]
+                            for brick in list(Collision.bricks):
+                                if (brick.rect.x == x and brick.rect.y == y and
+                                        brick.rect.w == w and brick.rect.h == h):
+                                    if hasattr(brick, 'data'):
+                                        Collision.game_state = b"".join(
+                                            map(bytes, Collision.game_state.split(brick.data))
+                                        )
+                                    Collision.bricks.remove(brick)
+                                    break
+                            q.put(data)
 
             except (ConnectionResetError, ConnectionRefusedError, socket.error) as e:
                 logger.error(f"LOG ERROR: {e}")
