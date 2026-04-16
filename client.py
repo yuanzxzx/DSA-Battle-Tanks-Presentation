@@ -4,6 +4,7 @@ import pygame as pg
 import queue 
 import threading as th
 import math
+import time
 from typing import Tuple, List
 
 from battle_tanks.components.text import TextComponent
