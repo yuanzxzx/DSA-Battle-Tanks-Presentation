@@ -64,6 +64,73 @@ from battle_tanks.menu import Menu
 #         return x, y
 
 
+# Load the burst fire icon asset
+# Ensure image_6377f2.png is saved as 'burst_icon.png' in assets/images/
+BURST_ICON = pg.image.load(ROUTE("assets/images/burst_icon.png"))
+BURST_ICON = pg.transform.scale(BURST_ICON, (60, 60)) # Scale to standard UI size
+
+# --- Suggestion 2: Burst Fire Function ---
+def handle_burst_fire(game, menu):
+    """
+    Handles rapid-fire (5 bullets) with a 15s cooldown on letter 'K'.
+    """
+    # Initialize variables on player if not already there
+    if not hasattr(game.player, 'bullets_fired_in_burst'):
+        game.player.bullets_fired_in_burst = 0
+        game.player.last_burst_time = 0
+        game.player.last_shot_time = 0
+        game.player.burst_cooldown = 15.0 
+        game.player.fire_rate_delay = 0
+
+    current_time = time.time()
+    keys = pg.key.get_pressed()
+
+    # 1. Check if we are in the 15s burst cooldown
+    if game.player.bullets_fired_in_burst >= 5:
+        if current_time - game.player.last_burst_time < game.player.burst_cooldown:
+            return 
+        else:
+            game.player.bullets_fired_in_burst = 0 
+
+    # 2. Shooting Trigger for "K" (Rapid Fire)
+    if keys[pg.K_k] and menu.select_option is not None:
+        if current_time - game.player.last_shot_time >= game.player.fire_rate_delay:
+            if game.player.check_available_bullets():
+                game.player.fire = True 
+                game.network.send_move_tcp(Struct.FIRE_EVENT_PLAYER)
+                game.player.last_shot_time = current_time
+                game.player.bullets_fired_in_burst += 1
+                
+                # Start cooldown only on the 5th bullet of a hold
+                if game.player.bullets_fired_in_burst == 5:
+                    game.player.last_burst_time = current_time
+    else:
+        # Reset counter on key release so single taps on K don't trigger cooldown
+        if game.player.bullets_fired_in_burst < 5:
+            game.player.bullets_fired_in_burst = 0
+
+def draw_burst_indicator(screen, game, x, y):
+    """
+    Draws the 'K' icon with a circular red cooldown overlay.
+    """
+    current_time = time.time()
+    
+    # Calculate cooldown progress percentage
+    time_passed = current_time - game.player.last_burst_time
+    progress = min(time_passed / game.player.burst_cooldown, 1.0)
+    
+    # Draw the base K icon
+    screen.blit(BURST_ICON, (x, y))
+    
+    # If cooling down, draw the red progress arc
+    if game.player.bullets_fired_in_burst >= 5 and progress < 1.0:
+        rect = pg.Rect(x, y, 60, 60)
+        # Arc representing time remaining in the 15s lockout
+        start_angle = math.radians(-90 + (progress * 360))
+        stop_angle = math.radians(270)
+        pg.draw.arc(screen, (255, 0, 0), rect, start_angle, stop_angle, 5)
+
+
 def network_client_consumer(client: NetworkComponent):
     """
     Waits for responses from the server and sends the results to the update queue.
@@ -127,6 +194,7 @@ def main():
 
 
     while True:
+        handle_burst_fire(game, menu)
         for event in pg.event.get():
             if event.type == pg.QUIT:
                 game.close()
@@ -141,6 +209,8 @@ def main():
         SCREEN.fill((0,0,0))
         game.update()
         game.draw(SCREEN)
+        draw_burst_indicator(SCREEN, game, WIDTH - 80, HEIGHT - 80)
+
 
         bullets.fill((0,50,0))
         game.player.type_gun.render(bullets)
