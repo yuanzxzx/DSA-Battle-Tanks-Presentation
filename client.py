@@ -35,7 +35,7 @@ def handle_burst_fire(game, menu):
     cooldown_elapsed = current_time - game.player.last_burst_time >= game.player.burst_cooldown
 
     # 2. Shooting Trigger for "K"
-    if keys[pg.K_k] and menu.select_option is not None:
+    if keys[pg.K_k]:
         # Trigger only if cooldown is done AND it's a fresh press
         if cooldown_elapsed and game.player.can_burst:
             # Instantly fire 5 bullets
