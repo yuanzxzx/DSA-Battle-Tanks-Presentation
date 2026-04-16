@@ -179,10 +179,6 @@ class Game:
                         player.angle_cannon = recv["angle_cannon"]
                         player.damage = recv["damage_indicator"]
                         
-                        # Camera shake when the player takes damage
-                        if recv["damage_indicator"] > old_damage and player.player_number == self._player_number:
-                            self.camera.shake(duration=12, intensity=5)
-                        
                         player.laser_active = recv.get("laser_active", getattr(player, "laser_active", False))
 
                     
