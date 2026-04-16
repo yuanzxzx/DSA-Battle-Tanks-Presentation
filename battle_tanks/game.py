@@ -71,7 +71,6 @@ class Game:
 
         self.players: Dict[int,Player] = {}
         self._bricks = pg.sprite.Group()
-        self._bullets = pg.sprite.Group()
         self._particles = pg.sprite.Group()
         self._damage = 0
                      
@@ -87,14 +86,8 @@ class Game:
         self.move = MovementComponent(self.network, self.player)
         self.load()
 
-        self._powerups = pg.sprite.Group()
-        self._landmines = pg.sprite.Group()
-        self.landmine_count = 0
         self._font = pg.font.Font(None, 24)  
-        self._spawn_powerups()
-        
-        self.notifications = [] 
-        self.mine_cooldown = 0
+        self.notifications = []
 
     def add_notification(self, text: str, duration: int = 120):
         self.notifications.append({"text": text, "timer": duration})
@@ -124,28 +117,7 @@ class Game:
                 self._bricks.add(brick)
                 Collision.bricks.add(brick)  # Also add to collision system
 
-    def _spawn_powerups(self):
-        """ Spawns 5 crates randomly across the map coordinates """
-        for _ in range(5):
-            rx = random.randint(100, 1000)
-            ry = random.randint(100, 1000)
-            self._powerups.add(PowerUp(rx, ry))
 
-    def place_landmine(self):
-        if self.landmine_count > 0:
-            mine = LandMine(int(self.player.rect.x), int(self.player.rect.y), self._player_number)
-            self._landmines.add(mine)
-            self.landmine_count -= 1
-            
-            if self.network:
-                event_data = Struct.pack_tile({
-                    "type": 98, 
-                    "x": mine.world_x,
-                    "y": mine.world_y,
-                    "w": self._player_number,
-                    "h": 0
-                })
-                self.network.send_move_tcp(event_data)
             
     def break_brick_locally(self, brick):
         """Handles the local visual removal of a brick."""
@@ -169,105 +141,8 @@ class Game:
             self.network.send_move_tcp(event_data)
     def update(self):
         """ Update Game"""
-        keys = pg.key.get_pressed()
-        if keys[pg.K_m] and self.mine_cooldown == 0 and self.landmine_count > 0:
-            self.place_landmine()
-            self.add_notification("Landmine Placed!")
-            self.mine_cooldown = 30  
-            
-        if self.mine_cooldown > 0:
-            self.mine_cooldown -= 1
-                
-                    
-        for key, player in self.players.items():
-            if player.fire:
-                SHOT.play()
-                player.fire = False
-                # Spawn bullet from cannon position
-                bullet_start_pos = player.rect_cannon.center
-                bullet = Bullet(bullet_start_pos, player.angle_cannon)
-                self._bullets.add(bullet)
-
-        self._bullets.update(self.tile_rect)
         self._particles.update()
         dt = 1/60
-
-        self._powerups.update()
-        
-        player_rect = pg.Rect(self.player.rect.x, self.player.rect.y, 40, 40)
-        for pu in [p for p in self._powerups if player_rect.colliderect(p.rect)]:
-            self.landmine_count += 1
-            pu.kill()
-            
-            rx = random.randint(100, 1000)
-            ry = random.randint(100, 1000)
-            self._powerups.add(PowerUp(rx, ry))
-            
-            self.add_notification("You got a Landmine!")
-        
-        active_tanks = [
-            {"x": p.rect.centerx, "y": p.rect.centery, "id": p.player_number, "obj": p} 
-            for p in self.players.values()
-        ]
-        
-        self._landmines.update(active_tanks, self._player_number)
-        
-        for mine in list(self._landmines):
-            if mine.check_trigger(active_tanks):
-                for p in active_tanks:
-                    dist = math.sqrt((p["x"] - mine.world_x)**2 + (p["y"] - mine.world_y)**2)
-                    if dist < LandMine.EXPLOSION_RADIUS:
-                        if p["obj"].player_number == self._player_number:
-                            damage_taken = int(LandMine.DAMAGE * (1 - dist / LandMine.EXPLOSION_RADIUS))
-                            
-                            if self.network:
-                                event_data = Struct.pack_tile({
-                                    "type": 99, 
-                                    "x": mine.world_x,
-                                    "y": mine.world_y,
-                                    "w": damage_taken,  
-                                    "h": self._player_number 
-                                })
-                                self.network.send_move_tcp(event_data)
-                            else:
-                                p["obj"].damage += damage_taken 
-                
-                mine.kill()
-                self._spawn_particles(mine.world_x, mine.world_y, count=20)
-                SOUND_BOOM.play()
-
-        # Check bullet collisions with bricks (destructible objects)
-        for bullet in self._bullets:
-            hit_bricks = pg.sprite.spritecollide(bullet, self._bricks, False,)
-            if hit_bricks:
-                for brick in hit_bricks:
-                    self._bricks.remove(brick)
-                    Collision.bricks.remove(brick)
-                    self._spawn_particles(brick.rect.centerx, brick.rect.centery)
-                    if self.network:
-                        event_data = Struct.pack_tile({
-                            "type": Struct.BROKE_BRICK,
-                            "x": brick.rect.x,
-                            "y": brick.rect.y,
-                            "w": brick.rect.w,
-                            "h": brick.rect.h
-                        })
-                        self.network.send_move_tcp(event_data)
-                    SOUND_BOOM.play()
-                    # Camera shake when hitting a brick
-                    self.camera.shake(duration=10, intensity=3)
-                    brick.kill()
-                bullet.kill()
-            
-            # Check bullet collisions with other players
-            for player in self.players.values():
-                if player.player_number == self._player_number:
-                    continue  # Don't check collision with self
-                if bullet.rect.colliderect(player.rect):
-                    # Camera shake when hitting another player
-                    self.camera.shake(duration=15, intensity=4)
-                    bullet.kill()
-                    break
                 
         """ SEND MOVES BYTES """
         self.move.keys()
@@ -334,21 +209,7 @@ class Game:
                 elif recv.get("status") == Struct.BLOCK:
                     Brick.boom() 
 
-                elif recv.get("status") == 98:
-                    owner_id = recv["w"]
-                    if owner_id != self._player_number: 
-                        enemy_mine = LandMine(recv["x"], recv["y"], owner_id)
-                        self._landmines.add(enemy_mine)
 
-                elif recv.get("status") == 99:
-                    hit_player_id = recv["h"]
-                    if hit_player_id != self._player_number:
-                        self._spawn_particles(recv["x"], recv["y"], count=20)
-                        SOUND_BOOM.play()
-        
-                        for mine in list(self._landmines):
-                            if mine.world_x == recv["x"] and mine.world_y == recv["y"]:
-                                mine.kill()
 
         self.camera.update(self.player)
 
@@ -357,11 +218,7 @@ class Game:
         # 1. DRAW BACKGROUND
         self.SCREEN.blit(self.tile_image,self.camera.apply_rect(self.tile_rect))
 
-        # 2. DRAW BULLETS
-        for bullet in self._bullets:
-            self.SCREEN.blit(bullet.image, self.camera.apply(bullet))
-
-        # 3. DRAW PLAYERS, LASERS, AND UI BARS
+        # 2. DRAW PLAYERS, LASERS, AND UI BARS
         for _,player in self.players.items():
             # Dibujar el tanque
             tank_rect = self.camera.apply(player)
