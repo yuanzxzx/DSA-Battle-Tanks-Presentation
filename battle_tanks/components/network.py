@@ -1,6 +1,7 @@
 """Server TCP connection"""
 
 import socket
+import struct
 from typing import Tuple, List, Union
 from battle_tanks.commons.package import Struct
 
@@ -13,11 +14,16 @@ class NetworkComponent:
     UPDATE_Q = SimpleQueue()
 
 
-    def __init__(self, addr: Tuple[str, int], name: str = "John"):
+    def __init__(self, addr: Tuple[str, int], name: str = "John", tank_color: int = 0):
         print(f"Connecting to {addr}, Player: {name}")
         self.name = name
         self.addr = addr
+        self.tank_color = tank_color
         self.lvl_map: str = ""
+        
+        # Instance-specific queues (not shared across instances)
+        self.SEND_Q = SimpleQueue()
+        self.UPDATE_Q = SimpleQueue()
 
         self._socket_tcp = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
         self._socket_tcp.connect(addr)
@@ -31,7 +37,17 @@ class NetworkComponent:
         """ Load player data INIT """
         ok = self._socket_tcp.recv(Struct.BUFFER_SIZE_EVENT)
         if ok == Struct.OK_MESSAGE:
-            self._socket_tcp.send(Struct.pack(self.name))
+            # Send name and tank_color
+            # Pad name to fixed length so server knows where color byte is
+            name_data = self.name.encode('utf-8')
+            # Pad or truncate to BUFFER_SIZE_NAME
+            if len(name_data) < Struct.BUFFER_SIZE_NAME:
+                name_data = name_data + b'\x00' * (Struct.BUFFER_SIZE_NAME - len(name_data))
+            else:
+                name_data = name_data[:Struct.BUFFER_SIZE_NAME]
+            
+            color_data = struct.pack('B', int(self.tank_color))
+            self._socket_tcp.send(name_data + color_data)
             lvl_map = self._socket_tcp.recv(Struct.BUFFER_SIZE_LVL_MAP)
             if lvl_map == Struct.USER_NOT_AVAILABLE:
                 return Struct.USER_NOT_AVAILABLE
@@ -51,7 +67,8 @@ class NetworkComponent:
                 "x": data_player[2],
                 "y": data_player[3],
                 "angle": data_player[4],
-                "angle_cannon": data_player[5]
+                "angle_cannon": data_player[5],
+                "tank_color": data_player[7] if len(data_player) > 7 else 0
             }
 
     @staticmethod
@@ -68,7 +85,8 @@ class NetworkComponent:
                 "y": data_arr[3],
                 "angle": data_arr[4],
                 "angle_cannon": data_arr[5],
-                "damage_indicator": data_arr[6]
+                "damage_indicator": data_arr[6],
+                "tank_color": data_arr[7] if len(data_arr) > 7 else 0
             }
 
         elif data_arr[0] == Struct.BROKE_BRICK:
