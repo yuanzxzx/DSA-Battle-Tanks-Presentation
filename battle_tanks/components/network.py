@@ -151,7 +151,18 @@ class NetworkComponent:
             sock.connect(addr)
 
             if sock.recv(Struct.BUFFER_SIZE_EVENT) == Struct.OK_MESSAGE:
-                sock.send(Struct.pack(name + "-c"))
+                # Send in same format as real connection: 32-byte padded name + tank_color byte
+                # Use "-c" suffix to indicate this is a validation check
+                name_check = (name + "-c")[:32]  # Truncate or use as-is
+                name_data = name_check.encode('utf-8')
+                # Pad to 32 bytes
+                if len(name_data) < Struct.BUFFER_SIZE_NAME:
+                    name_data = name_data + b'\x00' * (Struct.BUFFER_SIZE_NAME - len(name_data))
+                else:
+                    name_data = name_data[:Struct.BUFFER_SIZE_NAME]
+                
+                # Send name + tank_color byte (0 for validation)
+                sock.send(name_data + b'\x00')
                 return sock.recv(1) == Struct.OK_MESSAGE
 
         except socket.error as e:
