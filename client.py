@@ -14,6 +14,7 @@ from battle_tanks.components import NetworkComponent
 from battle_tanks.menu import Menu
 
 
+"""------Burst Algorithm Start------"""
 BURST_ICON = pg.image.load(ROUTE("assets/images/burst_icon.png"))
 BURST_ICON = pg.transform.scale(BURST_ICON, (60, 60))
 
@@ -34,13 +35,13 @@ def handle_burst_fire(game, menu):
     cooldown_elapsed = current_time - game.player.last_burst_time >= game.player.burst_cooldown
 
     # 2. Shooting Trigger for "K"
-    if keys[pg.K_k]:
+    if keys[pg.K_k] and menu.select_option is not None:
         # Trigger only if cooldown is done AND it's a fresh press
         if cooldown_elapsed and game.player.can_burst:
             # Instantly fire 5 bullets
             for _ in range(5):
-                game.player.fire = True 
-                if game.network:
+                if game.player.check_available_bullets():
+                    game.player.fire = True 
                     game.network.send_move_tcp(Struct.FIRE_EVENT_PLAYER)
             
             # Start cooldown immediately
@@ -71,6 +72,7 @@ def draw_burst_indicator(screen, game, x, y):
         start_angle = math.radians(-90 + (progress * 360))
         stop_angle = math.radians(270)
         pg.draw.arc(screen, (255, 0, 0), rect, start_angle, stop_angle, 5)
+"""------Burst Algorithm End------"""
 
 
 def network_client_consumer(client: NetworkComponent):
@@ -137,15 +139,15 @@ def main():
 
     while True:
         handle_burst_fire(game, menu)
+        """Burst indicator ^"""
         for event in pg.event.get():
             if event.type == pg.QUIT:
-                pg.quit()
-                return
+                game.close()
             elif event.type == pg.KEYUP:
                 key = event.dict.get("key")
-                if key == pg.K_o:
-                    game.player.fire = True
-                    if game.network:
+                if key == pg.K_o and menu.select_option is not None:
+                    if game.player.check_available_bullets():
+                        game.player.fire = True
                         game.network.send_move_tcp(Struct.FIRE_EVENT_PLAYER)
 
             
@@ -153,7 +155,7 @@ def main():
         game.update()
         game.draw(SCREEN)
         draw_burst_indicator(SCREEN, game, WIDTH - 80, HEIGHT - 80)
-
+        """Burst indicator on screen ^"""
 
         bullets.fill((0,50,0))
         game.player.type_gun.render(bullets)
