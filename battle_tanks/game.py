@@ -162,6 +162,15 @@ class Game:
                 for brick in hit_bricks:
                     self._bricks.remove(brick)
                     Collision.bricks.remove(brick)
+                    if self.network:
+                        event_data = Struct.pack_tile({
+                            "type": Struct.BROKE_BRICK,
+                            "x": brick.rect.x,
+                            "y": brick.rect.y,
+                            "w": brick.rect.w,
+                            "h": brick.rect.h
+                        })
+                        self.network.send_move_tcp(event_data)
                     SOUND_BOOM.play()
                     brick.kill()
                 bullet.kill()
