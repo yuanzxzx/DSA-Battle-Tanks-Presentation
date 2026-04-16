@@ -277,23 +277,11 @@ class Game:
                 pg.draw.rect(self.SCREEN, (0, 255, 255), 
                             (health_x, energy_y, current_energy_width, health_height))
 
-                inv_surface = font.render(f"Mines: {getattr(self, 'landmine_count', 0)}", True, (255, 255, 0))
-                inv_rect = inv_surface.get_rect()
-                inv_rect.centerx = tank_rect.centerx
-                inv_rect.top = energy_y + health_height + 2
-                self.SCREEN.blit(inv_surface, inv_rect)
-
         for brick in self._bricks:
             self.SCREEN.blit(brick.image, self.camera.apply(brick))
 
         for particle in self._particles:
             self.SCREEN.blit(particle.image, self.camera.apply(particle))
-
-
-        for pu in self._powerups:
-            self.SCREEN.blit(pu.image, self.camera.apply(pu))
-        for mine in self._landmines:
-            self.SCREEN.blit(mine.image, self.camera.apply(mine))
     
         telescopic_pos = Collision.calculate_bullet_position(self.player.telescopic_sight(), 100)
         telescopic_rect = self.camera.apply_rect(pg.rect.Rect(telescopic_pos[0],telescopic_pos[1],20,20))

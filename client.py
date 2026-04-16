@@ -34,13 +34,13 @@ def handle_burst_fire(game, menu):
     cooldown_elapsed = current_time - game.player.last_burst_time >= game.player.burst_cooldown
 
     # 2. Shooting Trigger for "K"
-    if keys[pg.K_k] and menu.select_option is not None:
+    if keys[pg.K_k]:
         # Trigger only if cooldown is done AND it's a fresh press
         if cooldown_elapsed and game.player.can_burst:
             # Instantly fire 5 bullets
             for _ in range(5):
-                if game.player.check_available_bullets():
-                    game.player.fire = True 
+                game.player.fire = True 
+                if game.network:
                     game.network.send_move_tcp(Struct.FIRE_EVENT_PLAYER)
             
             # Start cooldown immediately
@@ -139,12 +139,13 @@ def main():
         handle_burst_fire(game, menu)
         for event in pg.event.get():
             if event.type == pg.QUIT:
-                game.close()
+                pg.quit()
+                return
             elif event.type == pg.KEYUP:
                 key = event.dict.get("key")
-                if key == pg.K_o and menu.select_option is not None:
-                    if game.player.check_available_bullets():
-                        game.player.fire = True
+                if key == pg.K_o:
+                    game.player.fire = True
+                    if game.network:
                         game.network.send_move_tcp(Struct.FIRE_EVENT_PLAYER)
 
             
