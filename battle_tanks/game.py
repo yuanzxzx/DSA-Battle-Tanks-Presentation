@@ -10,6 +10,7 @@ from battle_tanks.components.movement import MovementComponent
 from battle_tanks.components.tile_map import TileMap
 from battle_tanks.components.camera import CameraComponent
 from battle_tanks.sprites import Player, Brick
+from battle_tanks.sprites.elements import Particle
 from battle_tanks.commons.municion import CannonType
 from battle_tanks.commons.tank_surface import tank_cover
 from battle_tanks.components.network import NetworkComponent
@@ -59,6 +60,7 @@ class Game:
         self.players: Dict[int,Player] = {}
         self._bricks = pg.sprite.Group()
         self._bullets = pg.sprite.Group()
+        self._particles = pg.sprite.Group()
         self._damage = 0
 
         if self.network and self.network.player_data != Struct.USER_NOT_AVAILABLE:
@@ -77,6 +79,18 @@ class Game:
     def damage(self):
         """ return damage from player """
         return self.player.damage
+    
+    def _spawn_particles(self, x, y, count=8):
+        """Spawn particles at brick destruction location"""
+        import math
+        import random
+        for _ in range(count):
+            angle = random.uniform(0, 2 * math.pi)
+            speed = random.uniform(2, 5)
+            vx = speed * math.cos(angle)
+            vy = speed * math.sin(angle)
+            particle = Particle(x, y, vx, vy, color=(139, 69, 19))
+            self._particles.add(particle)
 
 
     def load(self):
@@ -93,6 +107,8 @@ class Game:
             if player.fire:
                 SHOT.play()
                 player.fire = False
+        
+        self._particles.update()
 
         """ SEND MOVES BYTES """
         self.move.keys()
@@ -135,6 +151,7 @@ class Game:
                     sprite_brick = find_sprite(brick_rect, self._bricks)
                     if sprite_brick:
                         self._bricks.remove(sprite_brick)
+                        self._spawn_particles(sprite_brick.rect.centerx, sprite_brick.rect.centery)
                         SOUND_BOOM.play()
                         sprite_brick.kill()
 
@@ -186,6 +203,9 @@ class Game:
 
         for brick in self._bricks:
             self.SCREEN.blit(brick.image,self.camera.apply(brick))
+            
+        for particle in self._particles:
+            self.SCREEN.blit(particle.image, self.camera.apply(particle))
 
         telescopic_pos = Collision.calculate_bullet_position(self.player.telescopic_sight(), 100)
         telescopic_rect = self.camera.apply_rect(pg.rect.Rect(telescopic_pos[0],telescopic_pos[1],20,20))
