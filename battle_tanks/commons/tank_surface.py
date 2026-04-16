@@ -1,4 +1,4 @@
-import pygame
+﻿import pygame
 from typing import Tuple
 
 

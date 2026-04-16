@@ -1,4 +1,4 @@
-#!/usr/bin/python3
+﻿#!/usr/bin/python3
 """ this is the manager game """
 
 import sys
@@ -178,7 +178,7 @@ class Game:
             
             # Posicionar el texto encima del tanque
             text_rect.centerx = tank_rect.centerx
-            text_rect.bottom = tank_rect.top - 5  # 5 píxeles arriba del tanque
+            text_rect.bottom = tank_rect.top - 5  # 5 p├¡xeles arriba del tanque
             
             # Dibujar el texto
             self.SCREEN.blit(text_surface, text_rect)
@@ -187,7 +187,7 @@ class Game:
             health_width = 50  # Ancho de la barra de vida
             health_height = 5  # Alto de la barra de vida
             health_x = tank_rect.centerx - health_width // 2
-            health_y = text_rect.bottom + 2  # 2 píxeles debajo del nombre
+            health_y = text_rect.bottom + 2  # 2 p├¡xeles debajo del nombre
 
             # Barra de vida base (gris)
             pg.draw.rect(self.SCREEN, (100, 100, 100), 
