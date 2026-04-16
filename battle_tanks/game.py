@@ -14,7 +14,7 @@ from battle_tanks.components.camera import CameraComponent
 from battle_tanks.sprites import Player, Brick
 
 from battle_tanks.sprites.bullet import Bullet
-from battle_tanks.sprites.elements import Particle
+from battle_tanks.sprites.elements import Particle  
 from battle_tanks.commons.municion import CannonType
 from battle_tanks.commons.tank_surface import tank_cover
 from battle_tanks.components.network import NetworkComponent
@@ -162,6 +162,7 @@ class Game:
                 for brick in hit_bricks:
                     self._bricks.remove(brick)
                     Collision.bricks.remove(brick)
+                    self._spawn_particles(brick.rect.centerx, brick.rect.centery)
                     if self.network:
                         event_data = Struct.pack_tile({
                             "type": Struct.BROKE_BRICK,
