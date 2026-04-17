@@ -12,11 +12,8 @@ class CameraComponent:
         """ Apply the camera transformation to the entity """
         return entity.rect.move(self.camera.topleft)
     def apply_rect(self,rect):
-        """ mueve la posición de la surface a la pos de la camara en topleft (arriba/izquierda)"""
         return rect.move(self.camera.topleft)
     def update(self,target):
-        """Targe en negativo para que en caso de llegar al extremo left (positivo), 
-        el movimiento sea 0"""
         x_pos = -target.rect.centerx + self.screen_size[0] // 2
         y_pos = -target.rect.centery + self.screen_size[1] // 2
         #limit scrolling to map size
