@@ -23,7 +23,7 @@ from battle_tanks import ROUTE
 
 
 type_guns = {
-    "MEDIUM": CannonType(20,"MEDIUM",(8,10)),
+    "MEDIUM": CannonType(8,"MEDIUM",(8,10)),
 }
 pg.mixer.init()
 SOUND_BOOM = pg.mixer.Sound(ROUTE("assets/sound/boom.wav"))
@@ -301,18 +301,6 @@ class Game:
             
             pg.draw.rect(self.SCREEN, (255, 0, 0), 
                         (health_x, health_y, current_health_width, health_height))
-
-            if player.player_number == self._player_number:
-                energy_y = health_y + health_height + 2 
-                
-                pg.draw.rect(self.SCREEN, (50, 50, 50), 
-                            (health_x, energy_y, health_width, health_height))
-                
-                current_energy = getattr(player, "laser_energy", 100)
-                current_energy_width = int(health_width * (current_energy / 100))
-                
-                pg.draw.rect(self.SCREEN, (0, 255, 255), 
-                            (health_x, energy_y, current_energy_width, health_height))
 
         for brick in self._bricks:
             self.SCREEN.blit(brick.image, self.camera.apply(brick))
